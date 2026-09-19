@@ -1,0 +1,53 @@
+require("dotenv").config();
+
+const express = require("express");
+
+const connectDB = require("./config/db");
+
+const { startMonitoring } = require("./services/monitoringService");
+
+const tradeRoutes = require("./routes/tradeRoutes");
+
+const alertRoutes = require('./routes/alertRoutes');
+
+const notificationRoutes = require("./routes/notificationRoutes");
+
+const marketRoutes = require("./routes/marketRoutes");
+
+const monitorRoutes = require("./routes/monitorRoutes");
+
+const app = express();
+
+app.use(express.json());
+
+app.get("/", (req, res) => {
+    res.json({
+        success: true,
+        message: "TradeTrack backend is running"
+    });
+});
+
+app.use("/api/trades", tradeRoutes);
+
+app.use("/api/alerts", alertRoutes);
+
+app.use("/api/notifications", notificationRoutes);
+
+app.use("/api/market", marketRoutes);
+
+app.use("/api/monitor", monitorRoutes);
+
+
+const PORT = process.env.PORT || 5000;
+
+const startServer = async () => {
+    await connectDB();
+
+    startMonitoring()
+
+    app.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+    });
+};
+
+startServer();
