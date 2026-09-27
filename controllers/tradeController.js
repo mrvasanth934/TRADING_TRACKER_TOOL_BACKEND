@@ -272,15 +272,18 @@ const extractTradeFromScreenshot = async (req, res) => {
 
         const extracted = parseBrokerTradeText(data.text);
 
-        if (
-            !extracted.isGoldInstrument ||
-            !extracted.orderID ||
-            extracted.openPrice === null ||
-            !["BUY", "SELL"].includes(extracted.direction)
-        ) {
+        // Return whatever was successfully extracted
+        // Frontend will prefill the form and user can correct/complete missing fields
+        const hasAnyUsefulData =
+            extracted.orderID ||
+            extracted.openPrice !== null ||
+            extracted.direction ||
+            extracted.closePrice !== null;
+
+        if (!hasAnyUsefulData) {
             return res.status(422).json({
                 success: false,
-                message: "Could not reliably detect a valid XAUUSD trade, order ID, open price, and direction from this screenshot",
+                message: "Could not extract any trade details from this screenshot. Please make sure the image is clear and contains broker trade information.",
                 rawText: data.text
             });
         }
