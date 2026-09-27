@@ -1,3 +1,2151 @@
-trades
+const mongoose = require("mongoose");
 
-http://localhost:5000/api/trades
+const connectDB = async () => {
+    try {
+        await mongoose.connect(process.env.MONGODB_URI);
+
+        console.log("MongoDB connected successfully");
+    } catch (error) {
+        console.error("MongoDB connection failed:", error.message);
+        process.exit(1);
+    }
+};
+
+module.exports = connectDB;
+
+const Alert = require("../models/Alert");
+
+// Create alert
+const createAlert = async (req, res) => {
+    try {
+        const {
+            instrument,
+            alertType,
+            targetPrice,
+            condition,
+            timeframe,
+            enabled,
+            message
+        } = req.body;
+
+        if (!instrument || !alertType) {
+            return res.status(400).json({
+                success: false,
+                message: "Instrument and alert type are required"
+            });
+        }
+
+        if (alertType === "PRICE") {
+            if (targetPrice === undefined || targetPrice === null) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Target price is required for price alert"
+                });
+            }
+
+            if (!condition || !["ABOVE", "BELOW"].includes(condition.toUpperCase())) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Price alert condition must be ABOVE or BELOW"
+                });
+            }
+        }
+
+        const alert = await Alert.create({
+            instrument,
+            alertType,
+            targetPrice,
+            condition,
+            timeframe,
+            enabled,
+            message
+        });
+
+        res.status(201).json({
+            success: true,
+            message: "Alert created successfully",
+            data: alert
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// Get all alerts
+const getAlerts = async (req, res) => {
+    try {
+        const alerts = await Alert.find().sort({ createdAt: -1 });
+
+        res.status(200).json({
+            success: true,
+            message: "Alerts fetched successfully",
+            data: alerts
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// Get single alert
+const getAlertById = async (req, res) => {
+    try {
+        const alert = await Alert.findById(req.params.id);
+
+        if (!alert) {
+            return res.status(404).json({
+                success: false,
+                message: "Alert not found"
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Alert fetched successfully",
+            data: alert
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// Update alert
+const updateAlert = async (req, res) => {
+    try {
+        const alert = await Alert.findById(req.params.id);
+
+        if (!alert) {
+            return res.status(404).json({
+                success: false,
+                message: "Alert not found"
+            });
+        }
+
+        const allowedFields = [
+            "instrument",
+            "alertType",
+            "targetPrice",
+            "condition",
+            "timeframe",
+            "enabled",
+            "message"
+        ];
+
+        allowedFields.forEach((field) => {
+            if (req.body[field] !== undefined) {
+                alert[field] = req.body[field];
+            }
+        });
+
+        if (alert.alertType === "PRICE") {
+            if (alert.targetPrice === null || alert.targetPrice === undefined) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Target price is required for price alert"
+                });
+            }
+
+            if (
+                !alert.condition ||
+                !["ABOVE", "BELOW"].includes(alert.condition.toUpperCase())
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Price alert condition must be ABOVE or BELOW"
+                });
+            }
+        }
+
+        await alert.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Alert updated successfully",
+            data: alert
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// Delete alert
+const deleteAlert = async (req, res) => {
+    try {
+        const alert = await Alert.findById(req.params.id);
+
+        if (!alert) {
+            return res.status(404).json({
+                success: false,
+                message: "Alert not found"
+            });
+        }
+
+        await alert.deleteOne();
+
+        res.status(200).json({
+            success: true,
+            message: "Alert deleted successfully"
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// Enable / Disable alert
+const toggleAlert = async (req, res) => {
+    try {
+        const alert = await Alert.findById(req.params.id);
+
+        if (!alert) {
+            return res.status(404).json({
+                success: false,
+                message: "Alert not found"
+            });
+        }
+
+        alert.enabled = !alert.enabled;
+
+        await alert.save();
+
+        res.status(200).json({
+            success: true,
+            message: alert.enabled
+                ? "Alert enabled successfully"
+                : "Alert disabled successfully",
+            data: alert
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+module.exports = {
+    createAlert,
+    getAlerts,
+    getAlertById,
+    updateAlert,
+    deleteAlert,
+    toggleAlert
+};
+
+const {
+  getCurrentPrice,
+  getCandles
+} = require("../services/marketService");
+
+const {
+  detectTrend,
+  detectFVG,
+  detectOrderBlocks,
+  detectSupportResistance,
+  detectDoubleTop,
+  detectDoubleBottom
+} = require("../services/marketAnalyzer");
+
+// Get current market price
+const getMarketPrice = async (req, res) => {
+  try {
+    const { symbol } = req.params;
+
+    if (!symbol) {
+      return res.status(400).json({
+        success: false,
+        message: "Symbol is required"
+      });
+    }
+
+    const data = await getCurrentPrice(symbol.toUpperCase());
+
+    res.status(200).json({
+      success: true,
+      message: "Market price fetched successfully",
+      data
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// Get market candles
+const getMarketCandles = async (req, res) => {
+  try {
+    const { symbol } = req.params;
+
+    const interval = req.query.interval || "5min";
+
+    const allowedIntervals = [
+      "5min",
+      "15min",
+      "30min",
+      "1h",
+      "4h"
+    ];
+
+    if (!allowedIntervals.includes(interval)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid interval"
+      });
+    }
+
+    if (!symbol) {
+      return res.status(400).json({
+        success: false,
+        message: "Symbol is required"
+      });
+    }
+
+    const data = await getCandles(
+      symbol.toUpperCase(),
+      interval
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Market candles fetched successfully",
+      data
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// Analyze market
+const analyzeMarket = async (req, res) => {
+  try {
+    const { symbol } = req.params;
+
+    if (!symbol) {
+      return res.status(400).json({
+        success: false,
+        message: "Symbol is required"
+      });
+    }
+
+    const instrument = symbol.toUpperCase();
+
+    // Fetch candles for different timeframes
+    const [
+      candles4H,
+      candles1H,
+      candles30M,
+      candles15M,
+      candles5M
+    ] = await Promise.all([
+      getCandles(instrument, "4h", 100),
+      getCandles(instrument, "1h", 100),
+      getCandles(instrument, "30min", 100),
+      getCandles(instrument, "15min", 100),
+      getCandles(instrument, "5min", 100)
+    ]);
+
+    // Get current price
+    const currentPriceData = await getCurrentPrice(instrument);
+
+    // Detect trends
+    const trend = {
+      "4H": detectTrend(candles4H.candles),
+      "1H": detectTrend(candles1H.candles),
+      "30M": detectTrend(candles30M.candles),
+      "15M": detectTrend(candles15M.candles),
+      "5M": detectTrend(candles5M.candles)
+    };
+
+    // Use 15M candles for technical setup detection
+    const analysisCandles = candles15M.candles;
+
+    const fvg = detectFVG(analysisCandles);
+
+    const orderBlocks = detectOrderBlocks(
+      analysisCandles
+    );
+
+    const supportResistance =
+      detectSupportResistance(analysisCandles);
+
+    const doubleTop =
+      detectDoubleTop(analysisCandles);
+
+    const doubleBottom =
+      detectDoubleBottom(analysisCandles);
+
+    res.status(200).json({
+      success: true,
+      message: "Market analysis completed successfully",
+      data: {
+        instrument,
+        currentPrice: currentPriceData.price,
+
+        trend,
+
+        fvg,
+
+        orderBlocks,
+
+        support: supportResistance.support,
+
+        resistance: supportResistance.resistance,
+
+        doubleTop,
+
+        doubleBottom
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+module.exports = {
+  getMarketPrice,
+  getMarketCandles,
+  analyzeMarket
+};
+
+const {
+  monitorAlerts
+} = require("../services/monitoringService");
+
+const runMonitoring = async (req, res) => {
+  try {
+    await monitorAlerts();
+
+    res.status(200).json({
+      success: true,
+      message: "Monitoring completed successfully"
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+module.exports = {
+  runMonitoring
+};
+
+const Notification = require("../models/Notification");
+
+// Create notification
+const createNotification = async (req, res) => {
+  try {
+    const {
+      title,
+      message,
+      type,
+      instrument,
+      alertId,
+      isRead
+    } = req.body;
+
+    if (!title || !message || !type) {
+      return res.status(400).json({
+        success: false,
+        message: "Title, message and type are required"
+      });
+    }
+
+    const notification = await Notification.create({
+      title,
+      message,
+      type,
+      instrument,
+      alertId,
+      isRead
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Notification created successfully",
+      data: notification
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// Get all notifications
+const getNotifications = async (req, res) => {
+  try {
+    const notifications = await Notification.find()
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      message: "Notifications fetched successfully",
+      data: notifications
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// Get single notification
+const getNotificationById = async (req, res) => {
+  try {
+    const notification = await Notification.findById(req.params.id);
+
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: "Notification not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Notification fetched successfully",
+      data: notification
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// Update notification
+const updateNotification = async (req, res) => {
+  try {
+    const notification = await Notification.findById(req.params.id);
+
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: "Notification not found"
+      });
+    }
+
+    const allowedFields = [
+      "title",
+      "message",
+      "type",
+      "instrument",
+      "alertId",
+      "isRead"
+    ];
+
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        notification[field] = req.body[field];
+      }
+    });
+
+    await notification.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Notification updated successfully",
+      data: notification
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// Delete notification
+const deleteNotification = async (req, res) => {
+  try {
+    const notification = await Notification.findById(req.params.id);
+
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: "Notification not found"
+      });
+    }
+
+    await notification.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      message: "Notification deleted successfully"
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// Mark notification as read
+const markNotificationAsRead = async (req, res) => {
+  try {
+    const notification = await Notification.findById(req.params.id);
+
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: "Notification not found"
+      });
+    }
+
+    notification.isRead = true;
+
+    await notification.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Notification marked as read",
+      data: notification
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+module.exports = {
+  createNotification,
+  getNotifications,
+  getNotificationById,
+  updateNotification,
+  deleteNotification,
+  markNotificationAsRead
+};
+
+const { createWorker } = require("tesseract.js");
+const Trade = require("../models/Trade");
+
+let ocrWorkerPromise;
+
+const getOcrWorker = async () => {
+    if (!ocrWorkerPromise) {
+        ocrWorkerPromise = createWorker("eng");
+    }
+
+    return ocrWorkerPromise;
+};
+
+const cleanText = (text) => text
+    .replace(/\r/g, "")
+    .replace(/[|]/g, "")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+
+const findValue = (text, label) => {
+    const regex = new RegExp(`${label}\\s*:?\\s*(.+)`, "i");
+    const match = text.match(regex);
+    return match ? cleanText(match[1]) : "";
+};
+
+const findNumber = (text, label) => {
+    const value = findValue(text, label);
+    const match = value.match(/-?\$?\s*\d[\d,]*(?:\.\d+)?/);
+    return match ? Number(match[0].replace(/[$,\s]/g, "")) : null;
+};
+
+const findPercent = (text, label) => {
+    const value = findValue(text, label);
+    const match = value.match(/-?\d+(?:\.\d+)?/);
+    return match ? Number(match[0]) : null;
+};
+
+const parseDateTime = (value) => {
+    if (!value) return null;
+
+    const match = value.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (!match) return null;
+
+    let [, day, month, year, hour, minute, second = "00"] = match;
+    year = Number(year);
+    if (year < 100) year += 2000;
+
+    const date = new Date(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second)
+    );
+
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
+
+const parseAmount = (text) => {
+    const value = findValue(text, "Amount");
+    const match = value.match(/-?\d+(?:\.\d+)?/);
+    return match ? Number(match[0]) : null;
+};
+
+const parseTpSl = (text) => {
+    const value = findValue(text, "Take Profit\\s*\\/\\s*Stop Loss");
+    const numbers = value.match(/-?\d[\d,]*(?:\.\d+)?/g) || [];
+
+    return {
+        takeProfit: numbers[0] ? Number(numbers[0].replace(/,/g, "")) : null,
+        stopLoss: numbers[1] ? Number(numbers[1].replace(/,/g, "")) : null
+    };
+};
+
+const parseBrokerTradeText = (rawText) => {
+    const text = cleanText(rawText).replace(/\n/g, "\n");
+    const tpSl = parseTpSl(text);
+
+    const brokerInstrument = findValue(text, "Instrument")
+        .split(/\s+/)[0]
+        .toUpperCase()
+        .replace(/[^A-Z0-9/]/g, "");
+
+    const normalizedInstrument = brokerInstrument.replace(/[^A-Z]/g, "");
+
+    const isGoldInstrument =
+        normalizedInstrument === "XAUUSD" ||
+        normalizedInstrument === "XAU" ||
+        normalizedInstrument.startsWith("GOLD");
+
+    return {
+        isGoldInstrument,
+        symbol: "XAUUSD",
+        instrument: "XAUUSD",
+        orderID: findValue(text, "Order ID").split(/\s+/)[0],
+        ticket: findValue(text, "Ticket").split(/\s+/)[0],
+        direction: findValue(text, "Direction").split(/\s+/)[0].toUpperCase(),
+        amount: parseAmount(text),
+        entryPrice: findNumber(text, "Open Price"),
+        exitPrice: findNumber(text, "Close Price"),
+        closeReason: findValue(text, "Close Reason"),
+        profitLoss: findNumber(text, "Profit/Loss"),
+        priceMove: findPercent(text, "Price Move"),
+        swaps: findNumber(text, "Swaps") ?? 0,
+        type: findValue(text, "Type").split(/\s+/)[0].toUpperCase() || "MARKET",
+        takeProfit: tpSl.takeProfit,
+        stopLoss: tpSl.stopLoss,
+        entryTime: parseDateTime(findValue(text, "Time Opened")),
+        exitTime: parseDateTime(findValue(text, "Time Closed")),
+        serverEntryTime: parseDateTime(findValue(text, "Server Time Opened")),
+        serverExitTime: parseDateTime(findValue(text, "Server Time Closed")),
+        brokerInstrument,
+        rawText
+    };
+};
+
+const calculateProfitLoss = (tradeType, entryPrice, currentPrice) => {
+    if (currentPrice === null || currentPrice === undefined) return 0;
+    if (tradeType === "BUY") return currentPrice - entryPrice;
+    if (tradeType === "SELL") return entryPrice - currentPrice;
+    return 0;
+};
+
+const createTrade = async (req, res) => {
+    try {
+        const {
+            instrument = "XAUUSD",
+            symbol,
+            tradeType,
+            direction,
+            entryPrice,
+            exitPrice,
+            stopLoss,
+            takeProfit,
+            quantity,
+            amount,
+            lotSize,
+            entryTime,
+            exitTime,
+            serverEntryTime,
+            serverExitTime,
+            currentPrice,
+            profitLoss,
+            closeReason,
+            priceMove,
+            swaps,
+            type,
+            orderID,
+            ticket,
+            notes,
+            status
+        } = req.body;
+
+        const fixedInstrument = "XAUUSD";
+        const fixedDirection = direction || tradeType;
+
+        if (instrument !== fixedInstrument || (symbol && symbol !== fixedInstrument)) {
+            return res.status(400).json({
+                success: false,
+                message: "TradeTrack supports XAUUSD only"
+            });
+        }
+
+        if (!fixedDirection || entryPrice === undefined || entryPrice === null) {
+            return res.status(400).json({
+                success: false,
+                message: "Direction and open price are required"
+            });
+        }
+
+        const isClosed = status === "CLOSED" || exitPrice !== undefined && exitPrice !== null;
+
+        const trade = await Trade.create({
+            orderID,
+            ticket,
+            instrument: fixedInstrument,
+            tradeType: fixedDirection,
+            amount,
+            entryPrice,
+            exitPrice,
+            stopLoss,
+            takeProfit,
+            quantity: quantity ?? amount,
+            lotSize,
+            entryTime,
+            exitTime,
+            serverEntryTime,
+            serverExitTime,
+            status: isClosed ? "CLOSED" : "ACTIVE",
+            currentPrice: currentPrice ?? exitPrice ?? null,
+            profitLoss: profitLoss ?? (isClosed
+                ? calculateProfitLoss(fixedDirection, Number(entryPrice), Number(exitPrice))
+                : 0),
+            closeReason,
+            priceMove,
+            swaps,
+            type,
+            notes
+        });
+
+        res.status(201).json({
+            success: true,
+            message: "Trade created successfully",
+            data: trade
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const extractTradeFromScreenshot = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "Trade screenshot is required"
+            });
+        }
+
+        const worker = await getOcrWorker();
+        const { data } = await worker.recognize(req.file.buffer);
+
+        const extracted = parseBrokerTradeText(data.text);
+
+        if (
+            !extracted.isGoldInstrument ||
+            !extracted.entryPrice ||
+            !["BUY", "SELL"].includes(extracted.direction)
+        ) {
+            return res.status(422).json({
+                success: false,
+                message: "Could not reliably detect a valid XAUUSD trade, open price, and direction from this screenshot",
+                rawText: data.text
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Trade details extracted successfully",
+            data: extracted
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const getTrades = async (req, res) => {
+    try {
+        const trades = await Trade.find({ instrument: "XAUUSD" }).sort({ createdAt: -1 });
+
+        res.status(200).json({
+            success: true,
+            message: "Trades fetched successfully",
+            data: trades
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const getTradeById = async (req, res) => {
+    try {
+        const trade = await Trade.findById(req.params.id);
+
+        if (!trade) {
+            return res.status(404).json({
+                success: false,
+                message: "Trade not found"
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Trade fetched successfully",
+            data: trade
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const updateTrade = async (req, res) => {
+    try {
+        const trade = await Trade.findById(req.params.id);
+
+        if (!trade) {
+            return res.status(404).json({
+                success: false,
+                message: "Trade not found"
+            });
+        }
+
+        const allowedFields = [
+            "orderID", "ticket", "tradeType", "entryPrice", "exitPrice",
+            "stopLoss", "takeProfit", "amount", "quantity", "lotSize",
+            "entryTime", "exitTime", "serverEntryTime", "serverExitTime",
+            "status", "currentPrice", "profitLoss", "closeReason",
+            "priceMove", "swaps", "type", "notes"
+        ];
+
+        allowedFields.forEach((field) => {
+            if (req.body[field] !== undefined) trade[field] = req.body[field];
+        });
+
+        trade.instrument = "XAUUSD";
+
+        await trade.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Trade updated successfully",
+            data: trade
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const deleteTrade = async (req, res) => {
+    try {
+        const trade = await Trade.findById(req.params.id);
+
+        if (!trade) {
+            return res.status(404).json({
+                success: false,
+                message: "Trade not found"
+            });
+        }
+
+        await trade.deleteOne();
+
+        res.status(200).json({
+            success: true,
+            message: "Trade deleted successfully"
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+const closeTrade = async (req, res) => {
+    try {
+        const { exitPrice, profitLoss } = req.body;
+
+        if (exitPrice === undefined) {
+            return res.status(400).json({
+                success: false,
+                message: "Exit price is required"
+            });
+        }
+
+        const trade = await Trade.findById(req.params.id);
+
+        if (!trade) {
+            return res.status(404).json({
+                success: false,
+                message: "Trade not found"
+            });
+        }
+
+        if (trade.status === "CLOSED") {
+            return res.status(400).json({
+                success: false,
+                message: "Trade is already closed"
+            });
+        }
+
+        trade.exitPrice = Number(exitPrice);
+        trade.currentPrice = Number(exitPrice);
+        trade.profitLoss = profitLoss !== undefined
+            ? Number(profitLoss)
+            : calculateProfitLoss(trade.tradeType, trade.entryPrice, Number(exitPrice));
+        trade.status = "CLOSED";
+        trade.exitTime = new Date();
+
+        await trade.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Trade closed successfully",
+            data: trade
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+module.exports = {
+    createTrade,
+    extractTradeFromScreenshot,
+    getTrades,
+    getTradeById,
+    updateTrade,
+    deleteTrade,
+    closeTrade
+};
+
+const mongoose = require("mongoose");
+
+const alertSchema = new mongoose.Schema(
+    {
+        instrument: {
+            type: String,
+            required: true,
+            trim: true,
+            uppercase: true,
+            default: "XAUUSD",
+            enum: ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "BTCUSD", "NAS100", "US30"]
+        },
+
+        alertType: {
+            type: String,
+            required: true,
+            enum: [
+                "PRICE",
+                "FVG",
+                "ORDER_BLOCK",
+                "SUPPORT",
+                "RESISTANCE",
+                "DOUBLE_TOP",
+                "DOUBLE_BOTTOM"
+            ]
+        },
+
+        targetPrice: {
+            type: Number,
+            default: null,
+            min: 0
+        },
+
+        condition: {
+            type: String,
+            default: null,
+            trim: true,
+            uppercase: true
+        },
+
+        timeframe: {
+            type: String,
+            default: null,
+            trim: true
+        },
+
+        enabled: {
+            type: Boolean,
+            default: true
+        },
+
+        message: {
+            type: String,
+            trim: true,
+            default: ""
+        }
+    },
+    {
+        timestamps: true
+    }
+);
+
+module.exports = mongoose.model("Alert", alertSchema);
+
+const mongoose = require("mongoose");
+
+const notificationSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true
+    },
+
+    message: {
+      type: String,
+      required: true,
+      trim: true
+    },
+
+    type: {
+      type: String,
+      required: true,
+      enum: [
+        "PRICE_ALERT",
+        "FVG",
+        "ORDER_BLOCK",
+        "SUPPORT",
+        "RESISTANCE",
+        "DOUBLE_TOP",
+        "DOUBLE_BOTTOM",
+        "SYSTEM"
+      ]
+    },
+
+    instrument: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "XAUUSD",
+      enum: ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "BTCUSD", "NAS100", "US30"]
+    },
+
+    alertId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Alert",
+      default: null
+    },
+
+    isRead: {
+      type: Boolean,
+      default: false
+    }
+  },
+  {
+    timestamps: true
+  }
+);
+
+module.exports = mongoose.model("Notification", notificationSchema);
+
+const mongoose = require("mongoose");
+
+const tradeSchema = new mongoose.Schema(
+    {
+        orderID: {
+            type: String,
+            default: ""
+        },
+        ticket: {
+            type: String,
+            default: ""
+        },
+        account: {
+            type: String,
+            enum: ["Priya_Vasanth", "Vasanth", "Sarath"],
+            default: "Priya_Vasanth"
+        },
+        timeZone: {
+            type: String,
+            enum: ["SYDNEY", "LONDON", "NEW YORK"],
+            default: "NEW YORK"
+        },
+        instrument: {
+            type: String,
+            required: true,
+            trim: true,
+            uppercase: true,
+            enum: ["XAUUSD"],
+            default: "XAUUSD"
+        },
+        tradeType: {
+            type: String,
+            required: true,
+            enum: ["BUY", "SELL"]
+        },
+        amount: {
+            type: Number,
+            default: null,
+            min: 0
+        },
+        entryPrice: {
+            type: Number,
+            required: true,
+            min: 0
+        },
+        exitPrice: {
+            type: Number,
+            default: null,
+            min: 0
+        },
+        stopLoss: {
+            type: Number,
+            default: null,
+            min: 0
+        },
+        takeProfit: {
+            type: Number,
+            default: null,
+            min: 0
+        },
+        quantity: {
+            type: Number,
+            default: null,
+            min: 0
+        },
+        lotSize: {
+            type: Number,
+            default: null,
+            min: 0
+        },
+        closeReason: {
+            type: String,
+            default: ""
+        },
+        priceMove: {
+            type: Number,
+            default: null
+        },
+        swaps: {
+            type: Number,
+            default: 0
+        },
+        type: {
+            type: String,
+            default: "MARKET"
+        },
+        entryTime: {
+            type: Date,
+            default: Date.now
+        },
+        exitTime: {
+            type: Date,
+            default: null
+        },
+        serverEntryTime: {
+            type: Date,
+            default: null
+        },
+        serverExitTime: {
+            type: Date,
+            default: null
+        },
+        status: {
+            type: String,
+            enum: ["ACTIVE", "CLOSED"],
+            default: "ACTIVE"
+        },
+        currentPrice: {
+            type: Number,
+            default: null,
+            min: 0
+        },
+        profitLoss: {
+            type: Number,
+            default: 0
+        },
+        notes: {
+            type: String,
+            trim: true,
+            default: ""
+        }
+    },
+    {
+        timestamps: true
+    }
+);
+
+module.exports = mongoose.model("Trade", tradeSchema);
+
+const express = require("express");
+
+const { createAlert, getAlerts, getAlertById, updateAlert, toggleAlert, deleteAlert } = require("../controllers/alertController");
+
+const router = express.Router();
+
+router.post("/", createAlert);
+
+router.get("/", getAlerts);
+
+router.get("/:id", getAlertById);
+
+router.put("/:id", updateAlert);
+
+router.delete("/:id", deleteAlert);
+
+router.patch("/:id", toggleAlert);
+
+module.exports = router;
+
+const express = require("express");
+
+const {
+  getMarketPrice,
+  getMarketCandles,
+  analyzeMarket
+} = require("../controllers/marketController");
+
+const router = express.Router();
+
+router.get("/price/:symbol", getMarketPrice);
+
+router.get("/candles/:symbol", getMarketCandles);
+
+router.get("/analyze/:symbol", analyzeMarket);
+
+module.exports = router;
+
+const express = require("express");
+
+const {
+  runMonitoring
+} = require("../controllers/monitorController");
+
+const router = express.Router();
+
+router.post("/run", runMonitoring);
+
+module.exports = router;
+
+const express = require("express");
+
+const {
+  createNotification,
+  getNotifications,
+  getNotificationById,
+  updateNotification,
+  deleteNotification,
+  markNotificationAsRead
+} = require("../controllers/notificationController");
+
+const router = express.Router();
+
+router.post("/", createNotification);
+
+router.get("/", getNotifications);
+
+router.get("/:id", getNotificationById);
+
+router.put("/:id", updateNotification);
+
+router.delete("/:id", deleteNotification);
+
+router.patch("/:id/read", markNotificationAsRead);
+
+module.exports = router;
+
+const express = require("express");
+const multer = require("multer");
+
+const {
+    createTrade,
+    extractTradeFromScreenshot,
+    getTrades,
+    getTradeById,
+    updateTrade,
+    deleteTrade,
+    closeTrade
+} = require("../controllers/tradeController");
+
+const router = express.Router();
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: 10 * 1024 * 1024
+    },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith("image/")) {
+            cb(null, true);
+        } else {
+            cb(new Error("Only image files are allowed"));
+        }
+    }
+});
+
+router.post("/ocr", upload.single("screenshot"), extractTradeFromScreenshot);
+router.post("/", createTrade);
+router.get("/", getTrades);
+router.get("/:id", getTradeById);
+router.put("/:id", updateTrade);
+router.delete("/:id", deleteTrade);
+router.patch("/:id/close", closeTrade);
+
+module.exports = router;
+
+// Get candle body direction
+const getCandleDirection = (candle) => {
+  if (candle.close > candle.open) {
+    return "BULLISH";
+  }
+
+  if (candle.close < candle.open) {
+    return "BEARISH";
+  }
+
+  return "NEUTRAL";
+};
+
+// Detect trend using recent highs and lows
+const detectTrend = (candles) => {
+  if (!candles || candles.length < 5) {
+    return "NOT_ENOUGH_DATA";
+  }
+
+  const recent = candles.slice(-5);
+
+  const first = recent[0];
+  const last = recent[recent.length - 1];
+
+  const highestBefore = Math.max(
+    recent[0].high,
+    recent[1].high,
+    recent[2].high
+  );
+
+  const highestAfter = Math.max(
+    recent[2].high,
+    recent[3].high,
+    recent[4].high
+  );
+
+  const lowestBefore = Math.min(
+    recent[0].low,
+    recent[1].low,
+    recent[2].low
+  );
+
+  const lowestAfter = Math.min(
+    recent[2].low,
+    recent[3].low,
+    recent[4].low
+  );
+
+  if (
+    highestAfter > highestBefore &&
+    lowestAfter > lowestBefore &&
+    last.close > first.close
+  ) {
+    return "UPTREND";
+  }
+
+  if (
+    highestAfter < highestBefore &&
+    lowestAfter < lowestBefore &&
+    last.close < first.close
+  ) {
+    return "DOWNTREND";
+  }
+
+  return "SIDEWAYS";
+};
+
+// Detect simple 3-candle Fair Value Gap
+const detectFVG = (candles) => {
+  const fvgList = [];
+
+  if (!candles || candles.length < 3) {
+    return fvgList;
+  }
+
+  for (let i = 2; i < candles.length; i++) {
+    const first = candles[i - 2];
+    const middle = candles[i - 1];
+    const third = candles[i];
+
+    // Bullish FVG
+    if (third.low > first.high) {
+      fvgList.push({
+        type: "BULLISH",
+        from: first.high,
+        to: third.low,
+        candleIndex: i,
+        datetime: third.datetime
+      });
+    }
+
+    // Bearish FVG
+    if (third.high < first.low) {
+      fvgList.push({
+        type: "BEARISH",
+        from: third.high,
+        to: first.low,
+        candleIndex: i,
+        datetime: third.datetime
+      });
+    }
+  }
+
+  return fvgList;
+};
+
+// Detect possible Order Blocks
+const detectOrderBlocks = (candles) => {
+  const orderBlocks = [];
+
+  if (!candles || candles.length < 3) {
+    return orderBlocks;
+  }
+
+  for (let i = 1; i < candles.length - 1; i++) {
+    const previous = candles[i - 1];
+    const current = candles[i];
+    const next = candles[i + 1];
+
+    const currentBody = Math.abs(current.close - current.open);
+
+    const previousBody = Math.abs(
+      previous.close - previous.open
+    );
+
+    // Possible bullish order block
+    if (
+      getCandleDirection(previous) === "BEARISH" &&
+      getCandleDirection(current) === "BULLISH" &&
+      getCandleDirection(next) === "BULLISH" &&
+      currentBody > previousBody
+    ) {
+      orderBlocks.push({
+        type: "BULLISH",
+        high: previous.high,
+        low: previous.low,
+        datetime: previous.datetime
+      });
+    }
+
+    // Possible bearish order block
+    if (
+      getCandleDirection(previous) === "BULLISH" &&
+      getCandleDirection(current) === "BEARISH" &&
+      getCandleDirection(next) === "BEARISH" &&
+      currentBody > previousBody
+    ) {
+      orderBlocks.push({
+        type: "BEARISH",
+        high: previous.high,
+        low: previous.low,
+        datetime: previous.datetime
+      });
+    }
+  }
+
+  return orderBlocks;
+};
+
+// Detect recent support and resistance
+const detectSupportResistance = (candles) => {
+  if (!candles || candles.length < 5) {
+    return {
+      support: null,
+      resistance: null
+    };
+  }
+
+  const recent = candles.slice(-20);
+
+  const support = Math.min(
+    ...recent.map((candle) => candle.low)
+  );
+
+  const resistance = Math.max(
+    ...recent.map((candle) => candle.high)
+  );
+
+  return {
+    support,
+    resistance
+  };
+};
+
+// Detect possible double top
+const detectDoubleTop = (candles) => {
+  if (!candles || candles.length < 5) {
+    return null;
+  }
+
+  const recent = candles.slice(-20);
+
+  let firstHigh = null;
+  let secondHigh = null;
+
+  for (let i = 1; i < recent.length - 1; i++) {
+    const previous = recent[i - 1];
+    const current = recent[i];
+    const next = recent[i + 1];
+
+    if (
+      current.high > previous.high &&
+      current.high > next.high
+    ) {
+      if (!firstHigh) {
+        firstHigh = current;
+      } else {
+        secondHigh = current;
+      }
+    }
+  }
+
+  if (!firstHigh || !secondHigh) {
+    return null;
+  }
+
+  const difference = Math.abs(
+    firstHigh.high - secondHigh.high
+  );
+
+  const averagePrice =
+    (firstHigh.high + secondHigh.high) / 2;
+
+  const tolerance = averagePrice * 0.003;
+
+  if (difference <= tolerance) {
+    return {
+      detected: true,
+      firstHigh: firstHigh.high,
+      secondHigh: secondHigh.high,
+      tolerance
+    };
+  }
+
+  return null;
+};
+
+// Detect possible double bottom
+const detectDoubleBottom = (candles) => {
+  if (!candles || candles.length < 5) {
+    return null;
+  }
+
+  const recent = candles.slice(-20);
+
+  let firstLow = null;
+  let secondLow = null;
+
+  for (let i = 1; i < recent.length - 1; i++) {
+    const previous = recent[i - 1];
+    const current = recent[i];
+    const next = recent[i + 1];
+
+    if (
+      current.low < previous.low &&
+      current.low < next.low
+    ) {
+      if (!firstLow) {
+        firstLow = current;
+      } else {
+        secondLow = current;
+      }
+    }
+  }
+
+  if (!firstLow || !secondLow) {
+    return null;
+  }
+
+  const difference = Math.abs(
+    firstLow.low - secondLow.low
+  );
+
+  const averagePrice =
+    (firstLow.low + secondLow.low) / 2;
+
+  const tolerance = averagePrice * 0.003;
+
+  if (difference <= tolerance) {
+    return {
+      detected: true,
+      firstLow: firstLow.low,
+      secondLow: secondLow.low,
+      tolerance
+    };
+  }
+
+  return null;
+};
+
+module.exports = {
+  detectTrend,
+  detectFVG,
+  detectOrderBlocks,
+  detectSupportResistance,
+  detectDoubleTop,
+  detectDoubleBottom
+};
+
+const axios = require("axios");
+
+const BASE_URL = "https://api.twelvedata.com";
+
+// Get current market price
+const getCurrentPrice = async (symbol) => {
+  try {
+    const response = await axios.get(`${BASE_URL}/price`, {
+      params: {
+        symbol,
+        apikey: process.env.TWELVE_DATA_API_KEY
+      }
+    });
+
+    const data = response.data;
+
+    if (data.status === "error") {
+      throw new Error(data.message);
+    }
+
+    return {
+      symbol: data.symbol,
+      price: Number(data.price)
+    };
+  } catch (error) {
+    throw new Error(
+      error.response?.data?.message ||
+      error.message ||
+      "Failed to fetch market price"
+    );
+  }
+};
+
+// Get OHLC candles
+const getCandles = async (symbol, interval = "5min", outputsize = 100) => {
+  try {
+    const response = await axios.get(`${BASE_URL}/time_series`, {
+      params: {
+        symbol,
+        interval,
+        outputsize,
+        apikey: process.env.TWELVE_DATA_API_KEY
+      }
+    });
+
+    const data = response.data;
+
+    if (data.status === "error") {
+      throw new Error(data.message);
+    }
+
+    if (!data.values) {
+      throw new Error("No market candle data found");
+    }
+
+    const candles = data.values.map((candle) => ({
+      datetime: candle.datetime,
+      open: Number(candle.open),
+      high: Number(candle.high),
+      low: Number(candle.low),
+      close: Number(candle.close),
+      volume: candle.volume ? Number(candle.volume) : null
+    }));
+
+    return {
+      symbol: data.meta?.symbol || symbol,
+      interval: data.meta?.interval || interval,
+      candles
+    };
+  } catch (error) {
+    throw new Error(
+      error.response?.data?.message ||
+      error.message ||
+      "Failed to fetch market candles"
+    );
+  }
+};
+
+module.exports = {
+  getCurrentPrice,
+  getCandles
+};
+
+const cron = require("node-cron");
+
+const Alert = require("../models/Alert");
+const Notification = require("../models/Notification");
+
+const {
+    getCurrentPrice,
+    getCandles
+} = require("./marketService");
+
+const {
+    detectFVG,
+    detectOrderBlocks,
+    detectSupportResistance,
+    detectDoubleTop,
+    detectDoubleBottom
+} = require("./marketAnalyzer");
+
+const triggeredAlerts = new Map();
+
+// Check price alert
+const checkPriceAlert = (alert, currentPrice) => {
+    if (
+        alert.targetPrice === null ||
+        alert.targetPrice === undefined
+    ) {
+        return false;
+    }
+
+    if (alert.condition === "ABOVE") {
+        return currentPrice >= alert.targetPrice;
+    }
+
+    if (alert.condition === "BELOW") {
+        return currentPrice <= alert.targetPrice;
+    }
+
+    return false;
+};
+
+// Check technical alert
+const checkTechnicalAlert = (
+    alert,
+    analysis,
+    currentPrice
+) => {
+    if (alert.alertType === "FVG") {
+        return analysis.fvg.length > 0;
+    }
+
+    if (alert.alertType === "ORDER_BLOCK") {
+        return analysis.orderBlocks.length > 0;
+    }
+
+    if (alert.alertType === "SUPPORT") {
+        setupKey = `SUPPORT-${analysis.support}`;
+        if (analysis.support === null) {
+            return false;
+        }
+
+        const tolerance = currentPrice * 0.001;
+
+        return (
+            Math.abs(currentPrice - analysis.support) <=
+            tolerance
+        );
+    }
+
+    if (alert.alertType === "RESISTANCE") {
+        setupKey = `RESISTANCE-${analysis.resistance}`;
+        if (analysis.resistance === null) {
+            return false;
+        }
+
+        const tolerance = currentPrice * 0.001;
+
+        return (
+            Math.abs(currentPrice - analysis.resistance) <=
+            tolerance
+        );
+    }
+
+    if (alert.alertType === "DOUBLE_TOP") {
+        return analysis.doubleTop !== null;
+    }
+
+    if (alert.alertType === "DOUBLE_BOTTOM") {
+        return analysis.doubleBottom !== null;
+    }
+
+    return false;
+};
+
+// Create notification
+const createAlertNotification = async (
+    alert,
+    currentPrice,
+    setupKey
+) => {
+    const notificationKey = `${alert._id}-${setupKey}`;
+
+    if (triggeredAlerts.has(notificationKey)) {
+        return;
+    }
+
+    await Notification.create({
+        title: `${alert.alertType} Alert`,
+        message:
+            alert.message ||
+            `${alert.instrument} ${alert.alertType} alert triggered`,
+        type:
+            alert.alertType === "PRICE"
+                ? "PRICE_ALERT"
+                : alert.alertType,
+        instrument: alert.instrument,
+        alertId: alert._id,
+        isRead: false
+    });
+
+    triggeredAlerts.set(notificationKey, true);
+
+    console.log(
+        `Notification created for ${alert.instrument} - ${alert.alertType}`
+    );
+};
+
+// Monitor one alert
+const monitorAlert = async (alert) => {
+    const instrument = alert.instrument.toUpperCase();
+
+    // Price alert
+    if (alert.alertType === "PRICE") {
+        const priceData = await getCurrentPrice(instrument);
+
+        const currentPrice = priceData.price;
+
+        const matched = checkPriceAlert(
+            alert,
+            currentPrice
+        );
+
+        const setupKey = `PRICE-${alert.condition}-${alert.targetPrice}`;
+
+        const notificationKey = `${alert._id}-${setupKey}`;
+
+        if (!matched) {
+            triggeredAlerts.delete(notificationKey);
+            return;
+        }
+
+        await createAlertNotification(
+            alert,
+            currentPrice,
+            setupKey
+        );
+
+        return;
+    }
+
+    // Technical alerts use 15M candles
+    const [
+        candleData,
+        priceData
+    ] = await Promise.all([
+        getCandles(
+            instrument,
+            alert.timeframe || "15min",
+            100
+        ),
+        getCurrentPrice(instrument)
+    ]);
+
+    const candles = candleData.candles;
+    const currentPrice = priceData.price;
+
+    const analysis = {
+        fvg: detectFVG(candles),
+
+        orderBlocks: detectOrderBlocks(candles),
+
+        ...detectSupportResistance(candles),
+
+        doubleTop: detectDoubleTop(candles),
+
+        doubleBottom: detectDoubleBottom(candles)
+    };
+
+    const matched = checkTechnicalAlert(
+        alert,
+        analysis,
+        currentPrice
+    );
+
+    if (!matched) {
+        const possibleKeys = [
+            `${alert._id}-${alert.alertType}`
+        ];
+
+        possibleKeys.forEach((key) => {
+            triggeredAlerts.delete(key);
+        });
+
+        return;
+    }
+
+    let setupKey = alert.alertType;
+
+    if (alert.alertType === "FVG") {
+        const latestFVG =
+            analysis.fvg[analysis.fvg.length - 1];
+
+        setupKey = `FVG-${latestFVG.datetime}-${latestFVG.from}-${latestFVG.to}`;
+    }
+
+    if (alert.alertType === "ORDER_BLOCK") {
+        const latestOB =
+            analysis.orderBlocks[
+            analysis.orderBlocks.length - 1
+            ];
+
+        setupKey = `OB-${latestOB.datetime}-${latestOB.high}-${latestOB.low}`;
+    }
+
+    if (alert.alertType === "DOUBLE_TOP") {
+        setupKey = `DOUBLE_TOP-${analysis.doubleTop.firstHigh}-${analysis.doubleTop.secondHigh}`;
+    }
+
+    if (alert.alertType === "DOUBLE_BOTTOM") {
+        setupKey = `DOUBLE_BOTTOM-${analysis.doubleBottom.firstLow}-${analysis.doubleBottom.secondLow}`;
+    }
+
+    await createAlertNotification(
+        alert,
+        null,
+        setupKey
+    );
+};
+
+// Monitor all enabled alerts
+const monitorAlerts = async () => {
+    try {
+        const alerts = await Alert.find({
+            enabled: true
+        });
+
+        if (alerts.length === 0) {
+            console.log("No enabled alerts to monitor");
+            return;
+        }
+
+        console.log(
+            `Monitoring ${alerts.length} enabled alert(s)`
+        );
+
+        for (const alert of alerts) {
+            try {
+                await monitorAlert(alert);
+            } catch (error) {
+                console.error(
+                    `Alert monitoring failed for ${alert.instrument}:`,
+                    error.message
+                );
+            }
+        }
+    } catch (error) {
+        console.error(
+            "Automatic monitoring failed:",
+            error.message
+        );
+    }
+};
+
+// Start monitoring every minute
+const startMonitoring = () => {
+    cron.schedule("* * * * *", async () => {
+        console.log(
+            "Automatic monitoring started:",
+            new Date().toLocaleString()
+        );
+
+        await monitorAlerts();
+    });
+
+    console.log(
+        "Automatic monitoring service started"
+    );
+};
+
+module.exports = {
+    startMonitoring,
+    monitorAlerts
+};
+
+require("dotenv").config();
+
+const express = require("express");
+const cors = require("cors");
+
+const connectDB = require("./config/db");
+const { startMonitoring } = require("./services/monitoringService");
+
+const tradeRoutes = require("./routes/tradeRoutes");
+const alertRoutes = require("./routes/alertRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
+const marketRoutes = require("./routes/marketRoutes");
+const monitorRoutes = require("./routes/monitorRoutes");
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+app.get("/", (req, res) => {
+    res.json({
+        success: true,
+        message: "TradeTrack backend is running"
+    });
+});
+
+app.use("/api/trades", tradeRoutes);
+app.use("/api/alerts", alertRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/market", marketRoutes);
+app.use("/api/monitor", monitorRoutes);
+
+const PORT = process.env.PORT || 5000;
+
+const startServer = async () => {
+    await connectDB();
+    startMonitoring();
+
+    app.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+    });
+};
+
+startServer();
+

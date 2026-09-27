@@ -38,25 +38,24 @@ const findPercent = (text, label) => {
 const parseDateTime = (value) => {
     if (!value) return null;
 
-    const match = value.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    const match = value.match(
+        /(\d{1,2})\/(\d{1,2})\/(\d{2,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/
+    );
+
     if (!match) return null;
 
     let [, day, month, year, hour, minute, second = "00"] = match;
+
     year = Number(year);
-    if (year < 100) year += 2000;
 
-    const date = new Date(
-        Number(year),
-        Number(month) - 1,
-        Number(day),
-        Number(hour),
-        Number(minute),
-        Number(second)
-    );
+    if (year < 100) {
+        year += 2000;
+    }
 
-    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+    const formattedDate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+
+    return formattedDate;
 };
-
 const parseAmount = (text) => {
     const value = findValue(text, "Amount");
     const match = value.match(/-?\d+(?:\.\d+)?/);
@@ -74,7 +73,8 @@ const parseTpSl = (text) => {
 };
 
 const parseBrokerTradeText = (rawText) => {
-    const text = cleanText(rawText).replace(/\n/g, "\n");
+    const text = cleanText(rawText);
+
     const tpSl = parseTpSl(text);
 
     const brokerInstrument = findValue(text, "Instrument")
@@ -89,114 +89,153 @@ const parseBrokerTradeText = (rawText) => {
         normalizedInstrument === "XAU" ||
         normalizedInstrument.startsWith("GOLD");
 
+    const profitLoss = findNumber(text, "Profit/Loss");
+
+    let profitLossStatus = "BREAK_EVEN";
+
+    if (profitLoss > 0) {
+        profitLossStatus = "PROFIT";
+    } else if (profitLoss < 0) {
+        profitLossStatus = "LOSS";
+    }
+
     return {
         isGoldInstrument,
-        symbol: "XAUUSD",
+
+        orderID: findValue(text, "Order ID")
+            .split(/\s+/)[0],
+
         instrument: "XAUUSD",
-        orderID: findValue(text, "Order ID").split(/\s+/)[0],
-        ticket: findValue(text, "Ticket").split(/\s+/)[0],
-        direction: findValue(text, "Direction").split(/\s+/)[0].toUpperCase(),
+
+        direction: findValue(text, "Direction")
+            .split(/\s+/)[0]
+            .toUpperCase(),
+
         amount: parseAmount(text),
-        entryPrice: findNumber(text, "Open Price"),
-        exitPrice: findNumber(text, "Close Price"),
+
+        openPrice: findNumber(text, "Open Price"),
+
+        closePrice: findNumber(text, "Close Price"),
+
         closeReason: findValue(text, "Close Reason"),
-        profitLoss: findNumber(text, "Profit/Loss"),
+
+        profitLoss,
+
+        profitLossStatus,
+
         priceMove: findPercent(text, "Price Move"),
-        swaps: findNumber(text, "Swaps") ?? 0,
-        type: findValue(text, "Type").split(/\s+/)[0].toUpperCase() || "MARKET",
+
+        type: findValue(text, "Type")
+            .split(/\s+/)[0]
+            .toUpperCase() || "MARKET",
+
         takeProfit: tpSl.takeProfit,
+
         stopLoss: tpSl.stopLoss,
-        entryTime: parseDateTime(findValue(text, "Time Opened")),
-        exitTime: parseDateTime(findValue(text, "Time Closed")),
-        serverEntryTime: parseDateTime(findValue(text, "Server Time Opened")),
-        serverExitTime: parseDateTime(findValue(text, "Server Time Closed")),
-        brokerInstrument,
+
+        timeOpened: parseDateTime(
+            findValue(text, "Time Opened")
+        ),
+
+        timeClosed: parseDateTime(
+            findValue(text, "Time Closed")
+        ),
+
         rawText
     };
 };
 
-const calculateProfitLoss = (tradeType, entryPrice, currentPrice) => {
-    if (currentPrice === null || currentPrice === undefined) return 0;
-    if (tradeType === "BUY") return currentPrice - entryPrice;
-    if (tradeType === "SELL") return entryPrice - currentPrice;
+const calculateProfitLoss = (direction, openPrice, closePrice) => {
+    if (closePrice === null || closePrice === undefined) return 0;
+
+    if (direction === "BUY") {
+        return closePrice - openPrice;
+    }
+
+    if (direction === "SELL") {
+        return openPrice - closePrice;
+    }
+
     return 0;
 };
 
 const createTrade = async (req, res) => {
     try {
         const {
-            instrument = "XAUUSD",
-            symbol,
-            tradeType,
-            direction,
-            entryPrice,
-            exitPrice,
-            stopLoss,
-            takeProfit,
-            quantity,
-            amount,
-            lotSize,
-            entryTime,
-            exitTime,
-            serverEntryTime,
-            serverExitTime,
-            currentPrice,
-            profitLoss,
-            closeReason,
-            priceMove,
-            swaps,
-            type,
             orderID,
-            ticket,
-            notes,
-            status
+            instrument = "XAUUSD",
+            direction,
+            amount,
+            openPrice,
+            closePrice,
+            closeReason,
+            profitLoss,
+            priceMove,
+            type,
+            takeProfit,
+            stopLoss,
+            timeOpened,
+            timeClosed
         } = req.body;
 
-        const fixedInstrument = "XAUUSD";
-        const fixedDirection = direction || tradeType;
-
-        if (instrument !== fixedInstrument || (symbol && symbol !== fixedInstrument)) {
+        if (!orderID) {
             return res.status(400).json({
                 success: false,
-                message: "TradeTrack supports XAUUSD only"
+                message: "Order ID is required"
             });
         }
 
-        if (!fixedDirection || entryPrice === undefined || entryPrice === null) {
+        if (!direction || !["BUY", "SELL"].includes(direction.toUpperCase())) {
             return res.status(400).json({
                 success: false,
-                message: "Direction and open price are required"
+                message: "Direction must be BUY or SELL"
             });
         }
 
-        const isClosed = status === "CLOSED" || exitPrice !== undefined && exitPrice !== null;
+        if (openPrice === undefined || openPrice === null) {
+            return res.status(400).json({
+                success: false,
+                message: "Open price is required"
+            });
+        }
+
+        const existingTrade = await Trade.findOne({
+            orderID
+        });
+
+        if (existingTrade) {
+            return res.status(409).json({
+                success: false,
+                message: `Order ID ${req.body.orderID} already exists.`
+            });
+        }
+
+        const finalProfitLoss = Number(profitLoss || 0);
+
+        let profitLossStatus = "BREAK_EVEN";
+
+        if (finalProfitLoss > 0) {
+            profitLossStatus = "PROFIT";
+        } else if (finalProfitLoss < 0) {
+            profitLossStatus = "LOSS";
+        }
 
         const trade = await Trade.create({
             orderID,
-            ticket,
-            instrument: fixedInstrument,
-            tradeType: fixedDirection,
+            instrument: "XAUUSD",
+            direction: direction.toUpperCase(),
             amount,
-            entryPrice,
-            exitPrice,
-            stopLoss,
-            takeProfit,
-            quantity: quantity ?? amount,
-            lotSize,
-            entryTime,
-            exitTime,
-            serverEntryTime,
-            serverExitTime,
-            status: isClosed ? "CLOSED" : "ACTIVE",
-            currentPrice: currentPrice ?? exitPrice ?? null,
-            profitLoss: profitLoss ?? (isClosed
-                ? calculateProfitLoss(fixedDirection, Number(entryPrice), Number(exitPrice))
-                : 0),
+            openPrice,
+            closePrice,
             closeReason,
+            profitLoss: finalProfitLoss,
+            profitLossStatus,
             priceMove,
-            swaps,
             type,
-            notes
+            takeProfit,
+            stopLoss,
+            timeOpened,
+            timeClosed
         });
 
         res.status(201).json({
@@ -205,6 +244,13 @@ const createTrade = async (req, res) => {
             data: trade
         });
     } catch (error) {
+        if (error.code === 11000) {
+            return res.status(409).json({
+                success: false,
+                message: "Order ID already exists"
+            });
+        }
+
         res.status(500).json({
             success: false,
             message: error.message
@@ -228,12 +274,13 @@ const extractTradeFromScreenshot = async (req, res) => {
 
         if (
             !extracted.isGoldInstrument ||
-            !extracted.entryPrice ||
+            !extracted.orderID ||
+            extracted.openPrice === null ||
             !["BUY", "SELL"].includes(extracted.direction)
         ) {
             return res.status(422).json({
                 success: false,
-                message: "Could not reliably detect a valid XAUUSD trade, open price, and direction from this screenshot",
+                message: "Could not reliably detect a valid XAUUSD trade, order ID, open price, and direction from this screenshot",
                 rawText: data.text
             });
         }
@@ -304,16 +351,36 @@ const updateTrade = async (req, res) => {
         }
 
         const allowedFields = [
-            "orderID", "ticket", "tradeType", "entryPrice", "exitPrice",
-            "stopLoss", "takeProfit", "amount", "quantity", "lotSize",
-            "entryTime", "exitTime", "serverEntryTime", "serverExitTime",
-            "status", "currentPrice", "profitLoss", "closeReason",
-            "priceMove", "swaps", "type", "notes"
+            "instrument",
+            "direction",
+            "amount",
+            "openPrice",
+            "closePrice",
+            "closeReason",
+            "profitLoss",
+            "priceMove",
+            "type",
+            "takeProfit",
+            "stopLoss",
+            "timeOpened",
+            "timeClosed"
         ];
 
         allowedFields.forEach((field) => {
-            if (req.body[field] !== undefined) trade[field] = req.body[field];
+            if (req.body[field] !== undefined) {
+                trade[field] = req.body[field];
+            }
         });
+
+        const finalProfitLoss = Number(trade.profitLoss || 0);
+
+        if (finalProfitLoss > 0) {
+            trade.profitLossStatus = "PROFIT";
+        } else if (finalProfitLoss < 0) {
+            trade.profitLossStatus = "LOSS";
+        } else {
+            trade.profitLossStatus = "BREAK_EVEN";
+        }
 
         trade.instrument = "XAUUSD";
 
@@ -359,12 +426,12 @@ const deleteTrade = async (req, res) => {
 
 const closeTrade = async (req, res) => {
     try {
-        const { exitPrice, profitLoss } = req.body;
+        const { closePrice, profitLoss, closeReason } = req.body;
 
-        if (exitPrice === undefined) {
+        if (closePrice === undefined) {
             return res.status(400).json({
                 success: false,
-                message: "Exit price is required"
+                message: "Close price is required"
             });
         }
 
@@ -377,20 +444,36 @@ const closeTrade = async (req, res) => {
             });
         }
 
-        if (trade.status === "CLOSED") {
+        if (trade.closePrice !== null && trade.closePrice !== undefined) {
             return res.status(400).json({
                 success: false,
                 message: "Trade is already closed"
             });
         }
 
-        trade.exitPrice = Number(exitPrice);
-        trade.currentPrice = Number(exitPrice);
-        trade.profitLoss = profitLoss !== undefined
-            ? Number(profitLoss)
-            : calculateProfitLoss(trade.tradeType, trade.entryPrice, Number(exitPrice));
-        trade.status = "CLOSED";
-        trade.exitTime = new Date();
+        const finalClosePrice = Number(closePrice);
+
+        const finalProfitLoss =
+            profitLoss !== undefined
+                ? Number(profitLoss)
+                : calculateProfitLoss(
+                    trade.direction,
+                    trade.openPrice,
+                    finalClosePrice
+                );
+
+        trade.closePrice = finalClosePrice;
+        trade.profitLoss = finalProfitLoss;
+        trade.closeReason = closeReason || "Manual";
+        trade.timeClosed = new Date();
+
+        if (finalProfitLoss > 0) {
+            trade.profitLossStatus = "PROFIT";
+        } else if (finalProfitLoss < 0) {
+            trade.profitLossStatus = "LOSS";
+        } else {
+            trade.profitLossStatus = "BREAK_EVEN";
+        }
 
         await trade.save();
 

@@ -4,125 +4,94 @@ const tradeSchema = new mongoose.Schema(
     {
         orderID: {
             type: String,
-            default: ""
+            required: true,
+            unique: true,
+            trim: true
         },
-        ticket: {
-            type: String,
-            default: ""
-        },
-        account: {
-            type: String,
-            enum: ["Priya_Vasanth", "Vasanth", "Sarath"],
-            default: "Priya_Vasanth"
-        },
-        timeZone: {
-            type: String,
-            enum: ["SYDNEY", "LONDON", "NEW YORK"],
-            default: "NEW YORK"
-        },
+
         instrument: {
             type: String,
             required: true,
             trim: true,
             uppercase: true,
-            enum: ["XAUUSD"],
             default: "XAUUSD"
         },
-        tradeType: {
+
+        direction: {
             type: String,
             required: true,
             enum: ["BUY", "SELL"]
         },
+
         amount: {
-            type: Number,
-            default: null,
-            min: 0
+            type: String,
+            default: ""
         },
-        entryPrice: {
+
+        openPrice: {
             type: Number,
             required: true,
             min: 0
         },
-        exitPrice: {
+
+        closePrice: {
             type: Number,
             default: null,
             min: 0
         },
-        stopLoss: {
-            type: Number,
-            default: null,
-            min: 0
+
+        closeReason: {
+            type: String,
+            default: "",
+            trim: true
         },
+
+        profitLoss: {
+            type: Number,
+            default: 0
+        },
+
+        profitLossStatus: {
+            type: String,
+            enum: ["PROFIT", "LOSS", "BREAK_EVEN"],
+            default: "BREAK_EVEN"
+        },
+
+        priceMove: {
+            type: Number,
+            default: null
+        },
+
+        type: {
+            type: String,
+            default: "MARKET",
+            trim: true
+        },
+
         takeProfit: {
             type: Number,
             default: null,
             min: 0
         },
-        quantity: {
+
+        stopLoss: {
             type: Number,
             default: null,
             min: 0
         },
-        lotSize: {
-            type: Number,
-            default: null,
-            min: 0
-        },
-        closeReason: {
-            type: String,
-            default: ""
-        },
-        priceMove: {
-            type: Number,
-            default: null
-        },
-        swaps: {
-            type: Number,
-            default: 0
-        },
-        type: {
-            type: String,
-            default: "MARKET"
-        },
-        entryTime: {
-            type: Date,
-            default: Date.now
-        },
-        exitTime: {
+
+        timeOpened: {
             type: Date,
             default: null
         },
-        serverEntryTime: {
+
+        timeClosed: {
             type: Date,
             default: null
-        },
-        serverExitTime: {
-            type: Date,
-            default: null
-        },
-        status: {
-            type: String,
-            enum: ["ACTIVE", "CLOSED"],
-            default: "ACTIVE"
-        },
-        currentPrice: {
-            type: Number,
-            default: null,
-            min: 0
-        },
-        profitLoss: {
-            type: Number,
-            default: 0
-        },
-        notes: {
-            type: String,
-            trim: true,
-            default: ""
         }
     },
     {
         timestamps: true
     }
 );
-
 module.exports = mongoose.model("Trade", tradeSchema);
