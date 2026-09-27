@@ -6,7 +6,9 @@ const alertSchema = new mongoose.Schema(
             type: String,
             required: true,
             trim: true,
-            uppercase: true
+            uppercase: true,
+            default: "XAUUSD",
+            enum: ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "BTCUSD", "NAS100", "US30"]
         },
 
         alertType: {

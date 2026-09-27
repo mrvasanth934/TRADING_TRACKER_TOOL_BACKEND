@@ -33,7 +33,8 @@ const notificationSchema = new mongoose.Schema(
       type: String,
       trim: true,
       uppercase: true,
-      default: null
+      default: "XAUUSD",
+      enum: ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "BTCUSD", "NAS100", "US30"]
     },
 
     alertId: {

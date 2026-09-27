@@ -2,11 +2,27 @@ const mongoose = require("mongoose");
 
 const tradeSchema = new mongoose.Schema(
     {
+        orderID: {
+            type: String,
+            default:"orderID"
+        },
+        account: {
+            type: String,
+            enum: ["Priya_Vasanth", "Vasanth", "Sarath"],
+            default:"Priya_Vasanth"
+        },
+        timeZone: {
+            type:String,
+            enum:["SYDNEY","LONDON","NEW YORK"],
+            default:"NEW YORK"
+        },
         instrument: {
             type: String,
             required: true,
             trim: true,
-            uppercase: true
+            uppercase: true,
+            default:"XAUUSD",
+            enum: ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "BTCUSD", "NAS100", "US30"]
         },
 
         tradeType: {

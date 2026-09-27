@@ -204,8 +204,7 @@ const deleteTrade = async (req, res) => {
 // Close active trade
 const closeTrade = async (req, res) => {
     try {
-        const { exitPrice, exitTime } = req.body;
-
+        const { exitPrice} = req.body;
         if (exitPrice === undefined) {
             return res.status(400).json({
                 success: false,
@@ -237,7 +236,7 @@ const closeTrade = async (req, res) => {
         );
 
         trade.status = "CLOSED";
-        trade.exitTime = exitTime || new Date();
+        trade.exitTime = new Date();
 
         await trade.save();
 

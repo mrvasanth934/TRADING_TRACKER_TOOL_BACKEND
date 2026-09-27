@@ -12,8 +12,8 @@ router.get("/:id", getAlertById);
 
 router.put("/:id", updateAlert);
 
-router.delete("/:id", toggleAlert);
+router.delete("/:id", deleteAlert);
 
-router.patch("/:id/close", deleteAlert);
+router.patch("/:id", toggleAlert);
 
 module.exports = router;
