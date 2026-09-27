@@ -16,7 +16,7 @@ const app = express();
 
 const allowedOrigins = [
     "http://localhost:5173",
-    "https://trading-tracker-tool-backend.onrender.com/"
+    "https://trading-tracker-tool.vercel.app"
 ];
 
 
